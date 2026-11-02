@@ -1,0 +1,15 @@
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+
+# AEDT 產物
+output/*
+!output/.gitkeep
+logs/*
+!logs/.gitkeep
+*.aedt
+*.aedb/
+*.aedtresults/
+*.lock
+*.log

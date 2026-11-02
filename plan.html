@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Python ↔ Ansys AEDT 連線計畫（Icepak / Circuit）</title>
+<style>
+  :root{
+    --bg:#f7f7f5; --fg:#1f2328; --muted:#5b6470; --line:#dcdfe3;
+    --accent:#b4531f; --accent-soft:#fbeee4; --code-bg:#1e2430; --code-fg:#e6e9ef;
+    --ok:#1f7a4d; --warn:#9a6700; --card:#ffffff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.7 "Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:40px 24px 80px}
+  header{border-bottom:2px solid var(--accent);padding-bottom:16px;margin-bottom:32px}
+  header h1{font-size:28px;margin:0 0 6px}
+  header .meta{color:var(--muted);font-size:13px}
+  h2{font-size:20px;margin:40px 0 12px;padding-left:10px;border-left:4px solid var(--accent)}
+  h3{font-size:16px;margin:24px 0 8px}
+  p{margin:8px 0}
+  table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card);font-size:14px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#eeeeea;font-weight:600}
+  .table-x{overflow-x:auto}
+  pre{background:var(--code-bg);color:var(--code-fg);padding:14px 16px;border-radius:6px;overflow-x:auto;font:13px/1.55 Consolas,"Cascadia Mono",monospace;margin:10px 0}
+  code{font:13px Consolas,"Cascadia Mono",monospace;background:#ecebe6;padding:1px 5px;border-radius:3px}
+  pre code{background:none;padding:0;color:inherit}
+  .phase{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px 20px;margin:14px 0}
+  .phase h3{margin:0 0 6px;display:flex;align-items:center;gap:10px}
+  .tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .accept{margin-top:8px;padding:8px 12px;background:#eef7f1;border-left:3px solid var(--ok);font-size:14px}
+  .warn{padding:10px 14px;background:#fff8e1;border-left:3px solid var(--warn);margin:12px 0;font-size:14px}
+  .note{color:var(--muted);font-size:13px}
+  ul{margin:6px 0;padding-left:22px}
+  li{margin:3px 0}
+  .tree{font:13px/1.5 Consolas,monospace;background:var(--card);border:1px solid var(--line);padding:12px 16px;border-radius:6px;white-space:pre}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Python ↔ Ansys AEDT 連線計畫</h1>
+  <div class="meta">目標工具：Icepak / Circuit（AEDT 2025 R2）｜形式：連線測試腳本 MVP｜建立日期：2026-11-02｜專案：projects/ansys-python-connect</div>
+</header>
+
+<h2>1. 目標與範圍</h2>
+<p>用 Python（PyAEDT）在本機建立與 Ansys Electronics Desktop 2025 R2 的穩定連線，並以 Icepak 與 Circuit 兩個設計完成「開啟 → 建模 → 設定 → 存檔 → 釋放」的 smoke test。此 MVP 是後續電熱雙向耦合（Q3D → Circuit → Icepak 迭代）自動化的地基。</p>
+<p><strong>本階段不做：</strong>GUI、Web App、實際跑完整模擬（只做到可選的最小 analyze）。</p>
+
+<h2>2. 承接 05-27 研討會的決策</h2>
+<div class="table-x"><table>
+<tr><th>研討會決策</th><th>在本計畫的落實方式</th></tr>
+<tr><td>PyAnsys（PyAEDT）為主要自動化方向</td><td>全部以 <code>ansys.aedt.core</code> 高階 API 撰寫，僅在 API 缺口時回退到 COM / Record Script</td></tr>
+<tr><td>兩階段開發：先手寫 MVP 驗證 API，再交給 AI 擴充</td><td>Phase 1–3 即為手寫 MVP；驗證通過的腳本成為後續 AI 迭代的「參考腳本」</td></tr>
+<tr><td>新專案必須使用 UV 管環境、Git 管版本</td><td>Phase 0 直接以 <code>uv init</code> + <code>git init</code> 開案</td></tr>
+<tr><td>前處理不佔用求解器授權</td><td>smoke test 預設不呼叫 <code>analyze()</code>，可在無授權壓力下反覆測試</td></tr>
+<tr><td>錄製-提示-迭代</td><td>執行錯誤訊息回饋給 AI 修正，預期 2–3 輪收斂</td></tr>
+</table></div>
+
+<h2>3. 環境架構</h2>
+<div class="table-x"><table>
+<tr><th>項目</th><th>選擇</th><th>理由 / 備註</th></tr>
+<tr><td>AEDT</td><td>2025 R2（<code>version="2025.2"</code>）</td><td>安裝路徑由環境變數 <code>ANSYSEM_ROOT252</code> 自動偵測</td></tr>
+<tr><td>Python</td><td>3.11（由 UV 管理）</td><td>PyAEDT 支援 3.10–3.13；3.11 與 AEDT 內建 CPython 相容性最穩</td></tr>
+<tr><td>套件</td><td><code>pyaedt</code>（最新穩定版）</td><td>gRPC 模式為預設；不需額外裝 pywin32</td></tr>
+<tr><td>連線模式</td><td>gRPC，<code>new_desktop=True</code></td><td>每次測試開新 AEDT；日後可改 <code>new_desktop=False</code> 接既有視窗</td></tr>
+<tr><td>圖形模式</td><td>先 <code>non_graphical=False</code></td><td>開發期看得到畫面方便除錯；穩定後再切背景模式</td></tr>
+<tr><td>版控</td><td>Git（本機 repo）</td><td>每個 Phase 驗收通過即 commit</td></tr>
+</table></div>
+
+<div class="warn"><strong>執行環境提醒：</strong>AEDT 只在你的 Windows 工作站上，Claude 的沙箱無法啟動 AEDT。腳本由 Claude 產出，<strong>執行與回報錯誤由你在本機進行</strong>，再把輸出貼回來迭代。</div>
+
+<h2>4. 階段計畫</h2>
+
+<div class="phase">
+<h3><span class="tag">Phase 0</span> 環境建置 <span class="note">約 0.5 天</span></h3>
+<pre><code># 在工作資料夾 projects/ 底下
+uv init ansys-python-connect --python 3.11
+cd ansys-python-connect
+uv add pyaedt
+git init && git add . && git commit -m "init: uv + pyaedt"
+uv run python -c "import ansys.aedt.core as a; print(a.__version__)"</code></pre>
+<div class="accept">驗收：印出 PyAEDT 版本號；<code>uv.lock</code> 已 commit。</div>
+</div>
+
+<div class="phase">
+<h3><span class="tag">Phase 1</span> Desktop 握手測試 <span class="note">約 0.5 天</span></h3>
+<p>不開任何設計，只確認 Python 能啟動 / 連上 AEDT、讀到版本與 PID，並乾淨釋放。這一步過了，後面 90% 的「連不上」問題就排除了。</p>
+<div class="accept">驗收：印出 <code>aedt_version_id = 2025.2</code>、process id、gRPC port；腳本結束後工作管理員沒有殘留 <code>ansysedt.exe</code>。</div>
+</div>
+
+<div class="phase">
+<h3><span class="tag">Phase 2</span> Icepak smoke test <span class="note">約 1 天</span></h3>
+<p>建立 Icepak 設計 → 畫一個矽晶片 box → 指定 1 W 熱源 → 建立 Setup → 存檔。可選：呼叫 <code>analyze()</code> 確認求解器授權可取得。</p>
+<div class="accept">驗收：<code>.aedt</code> 檔可用 AEDT GUI 開啟，看得到 box、熱源邊界、Setup1。</div>
+</div>
+
+<div class="phase">
+<h3><span class="tag">Phase 3</span> Circuit smoke test <span class="note">約 1 天</span></h3>
+<p>建立 Circuit 設計 → 放 R、C、GND 並接線 → 建立 Nexxim LNA 掃頻 Setup → 存檔。可選：analyze 後用 <code>post.create_report()</code> 畫 S11。</p>
+<div class="accept">驗收：schematic 中元件已連線、Setup 參數正確；若有 analyze，能匯出一張報表圖。</div>
+</div>
+
+<div class="phase">
+<h3><span class="tag">Phase 4</span> 收斂成模板 <span class="note">約 0.5 天</span></h3>
+<ul>
+<li>把三支測試共用的啟動 / 釋放邏輯抽成 <code>session.py</code>（context manager）。</li>
+<li>把踩到的坑寫進 <code>_context/lessons-learned.md</code>。</li>
+<li>Git tag <code>v0.1-mvp</code>，作為日後 AI 迭代的參考腳本。</li>
+</ul>
+<div class="accept">驗收：三支測試都能用 <code>uv run</code> 一行跑完；lessons-learned 有內容。</div>
+</div>
+
+<div class="phase">
+<h3><span class="tag">下一步</span> 電熱雙向耦合（本計畫之外）</h3>
+<p>Q3D 抽寄生 → Circuit 算 Power Map → Icepak 熱分析 → 溫度回饋 Circuit → 迭代至收斂。MVP 穩定後再規劃。</p>
+</div>
+
+<h2>5. 資料夾結構</h2>
+<div class="tree">Ansys-Automation/
+├─ _context/                      ← 建議補上（about-me / lessons-learned / rules）
+└─ projects/
+   └─ ansys-python-connect/
+      ├─ plan.html                ← 本文件
+      ├─ pyproject.toml / uv.lock
+      ├─ src/aedt_connect/
+      │  ├─ __init__.py
+      │  ├─ config.py             ← AEDT_VERSION、NG_MODE、路徑常數集中於此
+      │  ├─ session.py            ← Desktop 啟動 / 釋放 context manager
+      │  ├─ test_desktop.py       ← Phase 1
+      │  ├─ test_icepak.py        ← Phase 2
+      │  └─ test_circuit.py       ← Phase 3
+      ├─ logs/                    ← PyAEDT log 與執行輸出
+      └─ output/                  ← 產生的 .aedt、報表圖</div>
+
+<h2>6. 核心程式碼骨架</h2>
+<p class="note">以下為 PyAEDT 近期版本（<code>ansys.aedt.core</code>）的參數命名：<code>project</code>、<code>design</code>、<code>version</code>、<code>non_graphical</code>、<code>new_desktop</code>。舊式 <code>projectname</code> / <code>specified_version</code> 已被棄用，看到警告時依此對照。</p>
+
+<h3>config.py</h3>
+<pre><code>from pathlib import Path
+
+AEDT_VERSION = "2025.2"
+NG_MODE = False                       # 穩定後改 True
+OUTPUT_DIR = Path(__file__).resolve().parents[2] / "output"
+OUTPUT_DIR.mkdir(exist_ok=True)</code></pre>
+
+<h3>session.py</h3>
+<pre><code>from contextlib import contextmanager
+from ansys.aedt.core import Desktop
+from .config import AEDT_VERSION, NG_MODE
+
+
+@contextmanager
+def aedt_session(non_graphical: bool = NG_MODE, new_desktop: bool = True):
+    """保證無論成功或例外，AEDT 都會被釋放，避免殘留程序與授權鎖。"""
+    desktop = Desktop(
+        version=AEDT_VERSION,
+        non_graphical=non_graphical,
+        new_desktop=new_desktop,
+        close_on_exit=True,
+    )
+    try:
+        yield desktop
+    finally:
+        desktop.release_desktop(close_projects=True, close_desktop=True)</code></pre>
+
+<h3>test_desktop.py（Phase 1）</h3>
+<pre><code>import ansys.aedt.core
+from aedt_connect.session import aedt_session
+
+print("PyAEDT :", ansys.aedt.core.__version__)
+
+with aedt_session() as d:
+    print("AEDT   :", d.aedt_version_id)
+    print("PID    :", d.aedt_process_id, " gRPC port:", d.port)
+    print("Projects open:", d.project_list())
+print("released OK")</code></pre>
+
+<h3>test_icepak.py（Phase 2）</h3>
+<pre><code>from ansys.aedt.core import Icepak
+from aedt_connect.config import AEDT_VERSION, NG_MODE, OUTPUT_DIR
+
+RUN_SOLVE = False   # 要測求解器授權時改 True
+
+ipk = Icepak(
+    project=str(OUTPUT_DIR / "connect_test.aedt"),
+    design="ipk_smoke",
+    version=AEDT_VERSION,
+    non_graphical=NG_MODE,
+    new_desktop=True,
+)
+try:
+    ipk.modeler.model_units = "mm"
+    chip = ipk.modeler.create_box(
+        origin=[0, 0, 0], sizes=[10, 10, 2], name="chip", material="silicon"
+    )
+    ipk.assign_solid_block(object_name="chip", power_assignment="1W")
+    setup = ipk.create_setup(name="Setup1")
+    print("objects :", ipk.modeler.object_names)
+    print("setups  :", [s.name for s in ipk.setups])
+    if RUN_SOLVE:
+        ipk.analyze(setup="Setup1")
+    ipk.save_project()
+finally:
+    ipk.release_desktop(close_projects=True, close_desktop=True)</code></pre>
+
+<h3>test_circuit.py（Phase 3）</h3>
+<pre><code>from ansys.aedt.core import Circuit
+from aedt_connect.config import AEDT_VERSION, NG_MODE, OUTPUT_DIR
+
+RUN_SOLVE = False
+
+cir = Circuit(
+    project=str(OUTPUT_DIR / "connect_test.aedt"),
+    design="cir_smoke",
+    version=AEDT_VERSION,
+    non_graphical=NG_MODE,
+    new_desktop=True,
+)
+try:
+    sch = cir.modeler.schematic
+    p1  = sch.create_interface_port(name="P1", location=[-0.02, 0.0])
+    r1  = sch.create_resistor(name="R1", value=50, location=[0.0, 0.0])
+    c1  = sch.create_capacitor(name="C1", value=1e-12, location=[0.02, 0.0])
+    gnd = sch.create_gnd(location=[0.04, 0.0])
+    p1.pins[0].connect_to_component(r1.pins[0])
+    r1.pins[1].connect_to_component(c1.pins[0])
+    c1.pins[1].connect_to_component(gnd.pins[0])
+
+    setup = cir.create_setup(name="LNA", setup_type="NexximLNA")
+    setup.props["SweepDefinition"]["Data"] = "LINC 1GHz 10GHz 101"
+    print("components:", list(sch.components.keys()))
+    if RUN_SOLVE:
+        cir.analyze_setup("LNA")
+    cir.save_project()
+finally:
+    cir.release_desktop(close_projects=True, close_desktop=True)</code></pre>
+
+<h2>7. 常見問題與風險</h2>
+<div class="table-x"><table>
+<tr><th>症狀</th><th>原因</th><th>處理</th></tr>
+<tr><td>找不到 AEDT / 版本錯誤</td><td><code>ANSYSEM_ROOT252</code> 未設或 version 字串不符</td><td>確認環境變數；version 必須是 <code>"2025.2"</code></td></tr>
+<tr><td>gRPC 連線逾時</td><td>防火牆擋住本機 port，或前次 AEDT 殘留</td><td>關閉殘留 <code>ansysedt.exe</code>；必要時指定 <code>port=</code></td></tr>
+<tr><td>專案被鎖（.lock）</td><td>上次未正常釋放</td><td>建構時加 <code>remove_lock=True</code>；一律用 try/finally 釋放</td></tr>
+<tr><td>腳本結束後 AEDT 還在</td><td>沒呼叫 <code>release_desktop</code></td><td>用 <code>session.py</code> 的 context manager</td></tr>
+<tr><td>背景模式卡死</td><td>呼叫 <code>RestoreWindow()</code> 之類 UI 命令</td><td>non_graphical 下避免任何視窗控制 API（見 ansys-aedt-automation skill）</td></tr>
+<tr><td>方法名稱不存在 / DeprecationWarning</td><td>PyAEDT 改版頻繁</td><td>以 <code>help(obj.method)</code> 或官方 docs 對照；舊名多半仍可用但會警告</td></tr>
+<tr><td>analyze 失敗：授權</td><td>求解器授權不足</td><td>smoke test 保持 <code>RUN_SOLVE=False</code>；前處理不佔求解授權</td></tr>
+</table></div>
+
+<h2>8. 驗收 Checklist</h2>
+<div class="table-x"><table>
+<tr><th>#</th><th>項目</th><th>狀態</th></tr>
+<tr><td>1</td><td>UV 環境建立，<code>pyaedt</code> 可 import</td><td>☐</td></tr>
+<tr><td>2</td><td>Desktop 握手：版本 / PID / port 正確，釋放後無殘留程序</td><td>☐</td></tr>
+<tr><td>3</td><td>Icepak：box + 熱源 + Setup 存檔成功，GUI 可開啟</td><td>☐</td></tr>
+<tr><td>4</td><td>Circuit：R-C-GND 接線 + LNA Setup 存檔成功</td><td>☐</td></tr>
+<tr><td>5</td><td>（可選）兩個設計各 analyze 一次成功</td><td>☐</td></tr>
+<tr><td>6</td><td><code>session.py</code> 抽出共用，三支測試皆以 <code>uv run</code> 執行</td><td>☐</td></tr>
+<tr><td>7</td><td>lessons-learned 更新、Git tag <code>v0.1-mvp</code></td><td>☐</td></tr>
+</table></div>
+
+<p class="note" style="margin-top:40px">參考：05-27 技術研討會摘要；ansys-aedt-automation skill；PyAEDT 官方文件 aedt.docs.pyansys.com。</p>
+
+</div>
+</body>
+</html>
