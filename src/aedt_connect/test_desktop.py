@@ -16,7 +16,7 @@ def main() -> None:
         print("AEDT version   :", d.aedt_version_id)
         print("AEDT PID       :", d.aedt_process_id)
         print("gRPC port      :", d.port)
-        print("Projects open  :", d.project_list())
+        print("Projects open  :", d.project_list)
 
     print("released OK")
 

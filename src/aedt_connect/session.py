@@ -22,4 +22,4 @@ def aedt_session(non_graphical: bool = NG_MODE, new_desktop: bool = True):
     try:
         yield desktop
     finally:
-        desktop.release_desktop(close_projects=True, close_desktop=True)
+        desktop.release_desktop(close_projects=True)
